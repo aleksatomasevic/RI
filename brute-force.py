@@ -1,42 +1,34 @@
 import itertools
 import numpy as np
+from pathlib import Path
+import json
 
-# R = 5  # Broj ruta
-# T = 2  # Broj tipova aviona
-# A_t = {0: 3, 1: 2}  # Broj aviona po tipu
-# P_r = [100, 150, 200, 180, 120]  # Broj putnika za svaku rutu
-# F_t_r = [ 
-#     [500, 600],  # Ruta 1, trošak za tipove 0 i 1
-#     [700, 800],  
-#     [400, 500],  
-#     [450, 550],  
-#     [650, 750],  
-# ]
-# C_t = [200, 300]  # Kapacitet aviona po tipu
-# T_r = [2, 3, 4, 2, 5]  # Vreme trajanja leta za svaku rutu
-# H_t = [1, 1]  # Vreme provedeno na zemlji za svaki tip aviona
-# alpha = 1 
-# beta = 1  
-# max_hours = 18  # Maksimalno vreme rada aviona
+# ucitavanje iz json fajla
+# kroisticemo apsolutne putanje do fajla
+current_dir = Path(__file__).parent  # direktorijum u kojem se nalazi trenutni .py fajl
+json_path = current_dir / "parameters.json"
 
-R = 5  # Broj ruta
-T = 3  # Broj tipova aviona
-A_t = {0: 2, 1: 1, 2:2}  # Broj aviona po tipu
-P_r = [70, 120, 90, 150, 100]  # Broj putnika za svaku rutu
-F_t_r = [ 
-    [400, 550, 600],  # Ruta 1, trošak za tipove 0 i 1
-    [500, 650, 750],  
-    [450, 500, 650],  
-    [600, 700, 800],
-    [350, 500, 550]   
-]
-C_t = [100, 120, 150]  # Kapacitet aviona po tipu
-T_r = [1.5, 2, 2.5, 3, 1.5]  # Vreme trajanja leta za svaku rutu
-H_t = [0.5, 1, 0.5]  # Vreme provedeno na zemlji za svaki tip aviona
-alpha = 1 
-beta = 1  
-max_hours = 10  # Maksimalno vreme rada aviona
-price_per_passenger = [10, 15, 12, 20, 10]  # Cena karte po putniku za svaku rutu
+with open(json_path, "r") as f:
+    datasets = json.load(f)
+
+# biramo skup podatak s kojim radimo
+selected_dataset = "dataset1"  
+params = datasets[selected_dataset]
+
+
+# postavljanje vrednosti promenljivama
+R = params["R"] # Broj ruta
+T = params["T"] # Broj tipova aviona
+A_t = {int(k): v for k, v in params["A_t"].items()}  # Broj aviona po tipu
+P_r = params["P_r"] # Broj putnika za svaku rutu
+F_t_r = params["F_t_r"] # Matrica troska konkretnog tipa aviona na konkretnoj ruti
+C_t = params["C_t"] # Kapacitet aviona po tipu
+T_r = params["T_r"] # Vreme trajanja leta za svaku rutu
+H_t = params["H_t"] # Vreme provedeno na zemlji za svaki tip aviona
+alpha = params["alpha"]
+beta = params["beta"]
+max_hours = params["max_hours"] # Maksimalno vreme rada aviona
+price_per_passenger = params["price_per_passenger"] # Cena karte po putniku za svaku rutu
 
 all_routes = range(R) #Sve rute
 all_types = range(T) #Svi tipovi
