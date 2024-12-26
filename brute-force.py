@@ -12,7 +12,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojim radimo
-selected_dataset = "dataset3"  
+selected_dataset = "dataset1"  
 params = datasets[selected_dataset]
 
 
@@ -53,13 +53,16 @@ def evaluate_solution(x_rt):
         route_profit = 0
         valid_assignments = 0  # Broj validnih dodela aviona za rutu
 
+        # Pronalazi prvi slobodan avion unutar svih tipova
+        earliest_time = min([min(available_times[t]) for t in all_types])
 
-        for t in all_types:
-            for a in specific_planes[t]:
-                if available_times[t][a] > 0:
-                    available_times[t][a] -= (current_time - previous_time)
-                    if available_times[t][a] < 0: #Avion je slobodan
-                        available_times[t][a]= 0
+
+        # for t in all_types:
+        #     for a in specific_planes[t]:
+        #         if available_times[t][a] > 0:
+        #             available_times[t][a] -= (current_time - previous_time)
+        #             if available_times[t][a] < 0: #Avion je slobodan
+        #                 available_times[t][a]= 0
 
 
         for t in all_types:
@@ -67,7 +70,7 @@ def evaluate_solution(x_rt):
                 
                 for a in specific_planes[t]:
                     if (
-                        available_times[t][a] <= 0 and
+                        available_times[t][a] <= earliest_time and
                         flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours
                     ):
                         cost = F_t_r[r][t]
@@ -78,7 +81,7 @@ def evaluate_solution(x_rt):
                         valid_assignments += 1
 
                         # Ažuriraj dostupnost i radne sate za trenutno avion
-                        available_times[t][a] += T_r[r] + H_t[t]
+                        available_times[t][a] = earliest_time + T_r[r] + H_t[t]
                         flight_hours[t][a] += T_r[r] + H_t[t]
 
                         break
