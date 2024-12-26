@@ -12,7 +12,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojim radimo
-selected_dataset = "dataset1"  
+selected_dataset = "dataset3"  
 params = datasets[selected_dataset]
 
 
@@ -49,7 +49,9 @@ def evaluate_solution(x_rt):
     print(f"Evaluacija kombinacije: \n{x_rt}") 
 
     for r in all_routes:
-        assigned = False  # Da li je ruta pokrivena
+        route_cost = 0
+        route_profit = 0
+        valid_assignments = 0  # Broj validnih dodela aviona za rutu
 
 
         for t in all_types:
@@ -62,8 +64,6 @@ def evaluate_solution(x_rt):
 
         for t in all_types:
             if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
-                best_a = None
-                best_cost = float('inf')
                 
                 for a in specific_planes[t]:
                     if (
@@ -73,23 +73,27 @@ def evaluate_solution(x_rt):
                         cost = F_t_r[r][t]
                         print(f"Ruta {r}, Tip {t}, Avion {a} je validan. Trošak: {cost}, "
                           f"Trenutno radno vreme: {flight_hours[t][a]}, Dostupnost: {available_times[t][a]}")  # Debugging
-                        if cost < best_cost:  # Avion sa najmanjim troskom
-                            best_a = a
-                            best_cost = cost
+                        route_cost += cost
+                        route_profit += min(P_r[r], C_t[t]) * price_per_passenger[r]
+                        valid_assignments += 1
 
-                # Avion je pronadjen?
-                if best_a is not None:
-                    print(f"Ruta {r} dodeljena tipu {t}, avionu {best_a}, trošak {best_cost}")  # Debugging linija
-                    available_times[t][best_a] += T_r[r] + H_t[t]
-                    flight_hours[t][best_a] += T_r[r] + H_t[t]
-                    total_cost += best_cost
-                    total_profit += min(P_r[r], C_t[t]) * price_per_passenger[r]
-                    assigned = True
-                    break
+                        # Ažuriraj dostupnost i radne sate za trenutno avion
+                        available_times[t][a] += T_r[r] + H_t[t]
+                        flight_hours[t][a] += T_r[r] + H_t[t]
 
-        if not assigned:  #Ruta nije pokrivena
-            total_cost += 10000  # Penal
+                        break
 
+        if valid_assignments > 1:
+            route_cost += 10000
+
+        if  not valid_assignments:  #Ruta nije pokrivena
+            print(f'Ruta {t} nije pokrivena')
+            route_cost += 10000  # Penal
+
+        # Dodaj ukupne troškove i profit za rutu
+        total_cost += route_cost
+        total_profit += route_profit
+        
         previous_time = current_time
         current_time += 1 #Simulacija vremena kroz svaki korak
 
