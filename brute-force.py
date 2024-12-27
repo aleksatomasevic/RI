@@ -12,7 +12,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojim radimo
-selected_dataset = "dataset1"  
+selected_dataset = "dataset3"  
 params = datasets[selected_dataset]
 
 
@@ -67,7 +67,7 @@ def evaluate_solution(x_rt):
 
         for t in all_types:
             if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
-                
+                valid_assignments += 1
                 for a in specific_planes[t]:
                     if (
                         available_times[t][a] <= earliest_time and
@@ -78,7 +78,6 @@ def evaluate_solution(x_rt):
                           f"Trenutno radno vreme: {flight_hours[t][a]}, Dostupnost: {available_times[t][a]}")  # Debugging
                         route_cost += cost
                         route_profit += min(P_r[r], C_t[t]) * price_per_passenger[r]
-                        valid_assignments += 1
 
                         # Ažuriraj dostupnost i radne sate za trenutno avion
                         available_times[t][a] = earliest_time + T_r[r] + H_t[t]
