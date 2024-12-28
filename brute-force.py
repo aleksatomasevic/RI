@@ -12,7 +12,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojim radimo
-selected_dataset = "dataset3"  
+selected_dataset = "dataset2"  
 params = datasets[selected_dataset]
 
 
@@ -52,6 +52,7 @@ def evaluate_solution(x_rt):
         route_cost = 0
         route_profit = 0
         valid_assignments = 0  # Broj validnih dodela aviona za rutu
+        assigned = False
 
         # Pronalazi prvi slobodan avion unutar svih tipova
         earliest_time = min([min(available_times[t]) for t in all_types])
@@ -67,13 +68,19 @@ def evaluate_solution(x_rt):
 
         for t in all_types:
             if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
-                valid_assignments += 1
+                # valid_assignments += 1
                 for a in specific_planes[t]:
                     if (
                         available_times[t][a] <= earliest_time and
                         flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours
                     ):
+                        valid_assignments += 1
+                        
                         cost = F_t_r[r][t]
+
+                        assigned = True
+
+
                         print(f"Ruta {r}, Tip {t}, Avion {a} je validan. Trošak: {cost}, "
                           f"Trenutno radno vreme: {flight_hours[t][a]}, Dostupnost: {available_times[t][a]}")  # Debugging
                         route_cost += cost
@@ -88,7 +95,7 @@ def evaluate_solution(x_rt):
         if valid_assignments > 1:
             route_cost += 10000
 
-        if  not valid_assignments:  #Ruta nije pokrivena
+        if  not assigned:  #Ruta nije pokrivena
             print(f'Ruta {t} nije pokrivena')
             route_cost += 10000  # Penal
 
