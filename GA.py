@@ -38,18 +38,49 @@ all_routes = range(R) #Sve rute
 all_types = range(T) #Svi tipovi
 specific_planes = {t: range(A_t[t]) for t in all_types}  # Skup specifičnih aviona unutar svakog tipa
 
+
 class Individual:
     def __init__(self, R, T):
-        self.code = np.random.randint(0, 2, size=(R, T))
+        # izmena
+        self.code = self.initialize_valid_solution(R, T)
+        #-------------------------------------------------
         self.fitness = None  # Fitnes se računa kasnije
+
+    # izmena
+    # ovo je funkcija koja ce da nam osigura da imamo tacno jednu jedinicu u svakoj vrti tj za svaku rutu
+    def initialize_valid_solution(self, R, T):
+        code = np.zeros((R, T), dtype=int)
+        for r in range(R):
+            t = random.randint(0, T-1)
+            code[r, t] = 1
+        return code
+
+    # funkcija koja ce da nam proverava validnost jedinke nakon mutacije i ukrstanja
+    # def is_valid(self):
+    #     return all(self.code[r].sum() == 1 for r in range(self.code.shape[0]))
+    #--------------------------------------------------------------------------
 
     def calculate_fitness(self):
         self.fitness, _, _ = self.evaluate_solution(self.code)
 
+    # def mutate(self):
+    #     r = random.randint(0, self.code.shape[0] - 1)
+    #     t = random.randint(0, self.code.shape[1] - 1)
+    #     self.code[r, t] = 1 - self.code[r, t]  # Flip bit
+
+    # izmena
     def mutate(self):
+        # uzmi random vrstu tj rutu
         r = random.randint(0, self.code.shape[0] - 1)
-        t = random.randint(0, self.code.shape[1] - 1)
-        self.code[r, t] = 1 - self.code[r, t]  # Flip bit
+        # nadji gde se nalazi 1 za tu rutu
+        t_old = np.argmax(self.code[r])  # Trenutni tip aviona za ovu rutu
+        # nasumicno biramo novi tip aviona za tu rutu od svih ostalih koji nisu t_old
+        t_new = random.choice([t for t in range(self.code.shape[1]) if t != t_old])  # Nasumično drugi tip
+
+        # Flipujemo vrednosti
+        self.code[r, t_old] = 0
+        self.code[r, t_new] = 1
+    #----------------------------------------------------------------------
 
     def evaluate_solution(self, x_rt):
         total_cost = 0
@@ -58,22 +89,22 @@ class Individual:
         flight_hours = {t: [0] * A_t[t] for t in all_types}
         current_time = 0 
         previous_time = 0 #Prethodno vreme za racunanje proteklog vremena izmedju njega i trenutnog
-
+        uncovered_routes = []
         # print(f"Evaluacija kombinacije: \n{x_rt}") 
 
         for r in all_routes:
             route_cost = 0
             route_profit = 0
-            valid_assignments = 0  # Broj validnih dodela aviona za rutu
+            #valid_assignments = 0  # Broj validnih dodela aviona za rutu
             assigned = False
 
             # Pronalazi prvi slobodan avion unutar svih tipova
-            earliest_time = min([min(available_times[t]) for t in all_types])
+            earliest_time = min([min(available_times[t]) for t in range(len(all_types))])
 
 
             for t in all_types:
                 if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
-                    valid_assignments += 1
+                    #valid_assignments += 1
                     
                     for a in specific_planes[t]:
                         if (
@@ -94,12 +125,13 @@ class Individual:
                             #valid_assignments += 1
 
                             break
-            if valid_assignments > 1:
-                route_cost += 1000000
+            # if valid_assignments > 1:
+            #     route_cost += 1000000
 
             if  not assigned:  #Ruta nije pokrivena
-                # print(f'Ruta {r} nije pokrivena')
-                route_cost += 1000000  # Penal
+                #print(f'Ruta {r} nije pokrivena')
+                #route_cost += 1000000  # Penal
+                uncovered_routes.append(r)
 
             # Dodaj ukupne troškove i profit za rutu
             total_cost += route_cost
@@ -108,15 +140,35 @@ class Individual:
             previous_time = current_time
             current_time += 1 #Simulacija vremena kroz svaki korak
 
+
         # F-ja koju minimizujemo
+        #print(f"Broj nepokrivenih ruta: {len(uncovered_routes)}")
         objective = alpha * total_cost - beta * total_profit
         # print(f"Ukupan trošak: {total_cost}, Ukupan profit: {total_profit}, Ciljna funkcija: {objective}\n")
         return objective, total_cost, total_profit
 
 def crossover(parent1, parent2, child1, child2):
     mask = np.random.randint(0, 2, size=(R, T))
-    child1.code = parent1.code * mask + parent2.code * (1 - mask)
-    child2.code = parent2.code * mask + parent1.code * (1 - mask)
+    temp1 = parent1.code * mask + parent2.code * (1 - mask)
+    temp2 = parent2.code * mask + parent1.code * (1 - mask)
+
+    # izmena
+    # Ispravi rešenja tako da svaka ruta ima tačno jednu jedinicu
+    for r in range(R):
+        # Popravi za dete 1
+        if temp1[r].sum() != 1:
+            t = random.randint(0, T - 1)
+            temp1[r] = np.zeros(T, dtype=int)
+            temp1[r, t] = 1
+        # Popravi za dete 2
+        if temp2[r].sum() != 1:
+            t = random.randint(0, T - 1)
+            temp2[r] = np.zeros(T, dtype=int)
+            temp2[r, t] = 1
+
+    child1.code = temp1
+    child2.code = temp2
+    #--------------------------------------------------------------------------
 
 def selection(population):
     TOURNAMENT_SIZE = 5
@@ -160,11 +212,14 @@ def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
 def generate_flight_schedule(best_code, destinations, plane_types, specific_planes, T_r, base_time):
     flight_schedule = []
     flight_count = 1  # Brojač letova
-    available_times = {t: [base_time] * A_t[t] for t in all_types}  # Početno vreme za sve avione
+    #available_times = {t: [base_time] * A_t[t] for t in all_types}  # Početno vreme za sve avione
+    available_times = {t: [base_time] * A_t[t] for t in range(len(all_types))}
+
 
     for r, row in enumerate(best_code):
         # Pronađi najranije dostupno vreme za sve avione
-        earliest_time = min([min(available_times[t]) for t in all_types])
+        #earliest_time = min([min(available_times[t]) for t in all_types])
+        earliest_time = min([min(available_times[t]) for t in range(len(all_types))])
 
         for t, assigned in enumerate(row):
             if assigned == 1:  # Ako je ruta pokrivena tipom aviona
@@ -192,10 +247,12 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
 
 # Parametri za genetski algoritam
 NUM_GENERATIONS = 10000
-POPULATION_SIZE = 20
+POPULATION_SIZE = 50
 ELITISIM_SIZE = POPULATION_SIZE // 10
 if ELITISIM_SIZE % 2 == 1:
     ELITISIM_SIZE -= 1 
+
+
 
 best_individual = genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE)
 print("Najbolja jedinka:")
