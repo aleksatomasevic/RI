@@ -13,7 +13,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojm radimo
-selected_dataset = "dataset4"  
+selected_dataset = "dataset7"  
 params = datasets[selected_dataset]
 
 
@@ -38,6 +38,43 @@ all_routes = range(R) #Sve rute
 all_types = range(T) #Svi tipovi
 specific_planes = {t: range(A_t[t]) for t in all_types}  # Skup specifičnih aviona unutar svakog tipa
 
+#izmena, proverava da li postoji bar jedno validno resenje unutar dataseta
+def validate_dataset(R, T, A_t, T_r, H_t, max_hours):
+    uncovered_routes = []
+    available_times = {t: [0] * A_t[t] for t in range(T)}  # Vremena dostupnosti za svaki avion
+    flight_hours = {t: [0] * A_t[t] for t in range(T)}  # Ukupno radno vreme za svaki avion
+
+    for r in range(R):
+        assigned = False
+        earliest_time = min([min(available_times[t]) for t in range(T)])  # Pronalazi najraniji avion
+
+        for t in range(T):
+            for a in range(A_t[t]):
+                if (
+                    available_times[t][a] <= earliest_time and  # Proverava da li avion može da poleti
+                    flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proverava ukupno radno vreme
+                ):
+                    # Ažuriraj dostupnost i radne sate aviona
+                    available_times[t][a] = earliest_time + T_r[r] + H_t[t]
+                    flight_hours[t][a] += T_r[r] + H_t[t]
+                    assigned = True
+                    break  # Dodeljen avion za ovu rutu
+            if assigned:
+                break  # Ruta je pokrivena, ne traži dalje
+
+        if not assigned:
+            uncovered_routes.append(r)  # Ako nijedan avion nije mogao da pokrije rutu
+
+    return uncovered_routes
+
+
+# Pozovi validate_dataset
+uncovered_routes = validate_dataset(R, T, A_t, T_r, H_t, max_hours)
+if uncovered_routes:
+    print(f"Nepokrivene rute u dataset-u: {uncovered_routes}")
+else:
+    print("Sve rute u dataset-u mogu biti pokrivene.")
+#-----------------------------------
 
 class Individual:
     def __init__(self, R, T):
@@ -48,7 +85,7 @@ class Individual:
 
     # izmena
     # ovo je funkcija koja ce da nam osigura da imamo tacno jednu jedinicu u svakoj vrti tj za svaku rutu
-    def initialize_valid_solution(self, R, T):
+    def initialize_valid_solution(self, R, T, epsilon=0.01):
         code = np.zeros((R, T), dtype=int)
         for r in range(R):
             t = random.randint(0, T-1)
@@ -61,26 +98,24 @@ class Individual:
     #--------------------------------------------------------------------------
 
     def calculate_fitness(self):
-        self.fitness, _, _ = self.evaluate_solution(self.code)
+        self.fitness, _, _, _ = self.evaluate_solution(self.code)
 
-    # def mutate(self):
-    #     r = random.randint(0, self.code.shape[0] - 1)
-    #     t = random.randint(0, self.code.shape[1] - 1)
-    #     self.code[r, t] = 1 - self.code[r, t]  # Flip bit
-
-    # izmena
-    def mutate(self):
-        # uzmi random vrstu tj rutu
+    # izmena, pametniji mutate
+    def mutate(self, generation, max_generations):
+        # Dinamička stopa mutacije
+        mutation_rate = 0.2 * (1 - generation / max_generations)
         r = random.randint(0, self.code.shape[0] - 1)
-        # nadji gde se nalazi 1 za tu rutu
-        t_old = np.argmax(self.code[r])  # Trenutni tip aviona za ovu rutu
-        # nasumicno biramo novi tip aviona za tu rutu od svih ostalih koji nisu t_old
-        t_new = random.choice([t for t in range(self.code.shape[1]) if t != t_old])  # Nasumično drugi tip
+        if random.random() < mutation_rate:  # Više jedinica
+            self.code[r] = np.zeros(self.code.shape[1], dtype=int)
+            self.code[r, random.randint(0, self.code.shape[1] - 1)] = 1
+        else:
+            t_old = np.argmax(self.code[r])
+            t_new = random.choice([t for t in range(self.code.shape[1]) if t != t_old])
+            self.code[r, t_old] = 0
+            self.code[r, t_new] = 1
+    #---------------------------------------------------------
 
-        # Flipujemo vrednosti
-        self.code[r, t_old] = 0
-        self.code[r, t_new] = 1
-    #----------------------------------------------------------------------
+
 
     def evaluate_solution(self, x_rt):
         total_cost = 0
@@ -95,7 +130,7 @@ class Individual:
         for r in all_routes:
             route_cost = 0
             route_profit = 0
-            #valid_assignments = 0  # Broj validnih dodela aviona za rutu
+            valid_assignments = 0  # Broj validnih dodela aviona za rutu
             assigned = False
 
             # Pronalazi prvi slobodan avion unutar svih tipova
@@ -122,15 +157,16 @@ class Individual:
                             available_times[t][a] = earliest_time + T_r[r] + H_t[t]
                             flight_hours[t][a] += T_r[r] + H_t[t]
 
-                            #valid_assignments += 1
+                            valid_assignments += 1
 
                             break
-            # if valid_assignments > 1:
-            #     route_cost += 1000000
+            if valid_assignments > 1:
+                 penalty = 20000 * valid_assignments  # Penal po jedinici iznad jedne
+                 route_cost += penalty
 
             if  not assigned:  #Ruta nije pokrivena
                 #print(f'Ruta {r} nije pokrivena')
-                #route_cost += 1000000  # Penal
+                route_cost += 100000  # Penal
                 uncovered_routes.append(r)
 
             # Dodaj ukupne troškove i profit za rutu
@@ -145,9 +181,9 @@ class Individual:
         #print(f"Broj nepokrivenih ruta: {len(uncovered_routes)}")
         objective = alpha * total_cost - beta * total_profit
         # print(f"Ukupan trošak: {total_cost}, Ukupan profit: {total_profit}, Ciljna funkcija: {objective}\n")
-        return objective, total_cost, total_profit
+        return objective, total_cost, total_profit, uncovered_routes
 
-def crossover(parent1, parent2, child1, child2):
+def crossover(parent1, parent2, child1, child2, crossover_epsilon=0.1):
     mask = np.random.randint(0, 2, size=(R, T))
     temp1 = parent1.code * mask + parent2.code * (1 - mask)
     temp2 = parent2.code * mask + parent1.code * (1 - mask)
@@ -155,7 +191,6 @@ def crossover(parent1, parent2, child1, child2):
     # izmena
     # Ispravi rešenja tako da svaka ruta ima tačno jednu jedinicu
     for r in range(R):
-        # Popravi za dete 1
         if temp1[r].sum() != 1:
             t = random.randint(0, T - 1)
             temp1[r] = np.zeros(T, dtype=int)
@@ -170,11 +205,38 @@ def crossover(parent1, parent2, child1, child2):
     child2.code = temp2
     #--------------------------------------------------------------------------
 
+# def selection(population):
+#     TOURNAMENT_SIZE = 5
+#     selected = random.sample(population, TOURNAMENT_SIZE)
+    
+#     # Računaj diverzitet unutar turnira
+#     diversity_bonus = [
+#         sum(np.sum(np.abs(ind.code - other.code)) for other in selected) for ind in selected
+#     ]
+    
+#     # Kombinujte fitnes i bonus za diverzitet
+#     fitness_with_diversity = [
+#         ind.fitness - 0.1 * diversity for ind, diversity in zip(selected, diversity_bonus)
+#     ]
+    
+#     # Izaberi jedinku sa najboljim kombinovanim fitnesom
+#     best = selected[np.argmin(fitness_with_diversity)]
+#     return best
+
+#izmena, pametniji selection 
 def selection(population):
-    TOURNAMENT_SIZE = 5
-    selected = random.sample(population, TOURNAMENT_SIZE)
-    best = min(selected, key=lambda ind: ind.fitness)
-    return best
+    # Rangiraj populaciju prema fitnesu (manji fitnes je bolji)
+    population.sort(key=lambda x: x.fitness)
+    
+    # Izračunaj šanse za selekciju
+    total_rank = sum(range(1, len(population) + 1))
+    probabilities = [rank / total_rank for rank in range(1, len(population) + 1)]
+    
+    # Selektuj jedinku prema verovatnoći
+    selected = np.random.choice(population, p=probabilities)
+    return selected
+#------------------------------------
+
 
 def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
     # Inicijalizacija populacije
@@ -195,8 +257,8 @@ def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
             crossover(parent1, parent2, newPopulation[i], newPopulation[i+1])
 
             # Mutacija
-            newPopulation[i].mutate()
-            newPopulation[i+1].mutate()
+            newPopulation[i].mutate(generation, NUM_GENERATIONS)
+            newPopulation[i+1].mutate(generation, NUM_GENERATIONS)
 
             # Računanje fitnesa
             newPopulation[i].calculate_fitness()
@@ -214,21 +276,26 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
     flight_count = 1  # Brojač letova
     #available_times = {t: [base_time] * A_t[t] for t in all_types}  # Početno vreme za sve avione
     available_times = {t: [base_time] * A_t[t] for t in range(len(all_types))}
+    flight_hours = {t: [0] * A_t[t] for t in range(len(all_types))}  # Početno radno vreme za sve avione
+
 
 
     for r, row in enumerate(best_code):
         # Pronađi najranije dostupno vreme za sve avione
         #earliest_time = min([min(available_times[t]) for t in all_types])
+        assigned = False # Da li je ruta pokrivena
         earliest_time = min([min(available_times[t]) for t in range(len(all_types))])
 
         for t, assigned in enumerate(row):
             if assigned == 1:  # Ako je ruta pokrivena tipom aviona
                 for a in specific_planes[t]:
                     if (
-                        available_times[t][a] <= earliest_time
+                        available_times[t][a] <= earliest_time and  # Proveri dostupnost
+                        flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proveri maksimalno radno vreme
                     ):
                         departure_time = available_times[t][a]  # Vreme polaska
                         available_times[t][a] += T_r[r] + H_t[t]  # Ažuriranje vremena dostupnosti
+                        flight_hours[t][a] += T_r[r] + H_t[t]  # Ažuriranje radnog vremena
 
                         flight_schedule.append({
                             "Flight Number": flight_count,
@@ -238,6 +305,7 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
                             "Departure Time": f"{departure_time}:00"
                         })
                         flight_count += 1
+                        assigned = True
                         break  # Prvi slobodan avion unutar tipa
 
     # Kreiraj i prikaži tabelu
@@ -246,18 +314,28 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
     return df
 
 # Parametri za genetski algoritam
-NUM_GENERATIONS = 10000
-POPULATION_SIZE = 50
-ELITISIM_SIZE = POPULATION_SIZE // 10
+NUM_GENERATIONS = 5000
+POPULATION_SIZE = 200
+ELITISIM_SIZE = POPULATION_SIZE // 20
 if ELITISIM_SIZE % 2 == 1:
     ELITISIM_SIZE -= 1 
-
 
 
 best_individual = genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE)
 print("Najbolja jedinka:")
 print(best_individual.code)
-print(f"Fitnes: {best_individual.fitness}")
+
+#izmena aleksa
+fitness, total_cost, total_profit, uncovered_routes = best_individual.evaluate_solution(best_individual.code)
+print(f"Fitnes: {fitness}")
+print(f"Ukupan trošak: {total_cost}, Ukupan profit: {total_profit}")
+if uncovered_routes:
+    print(f"Nepokrivene rute: {uncovered_routes}")
+    print(f"Broj nepokrivenih ruta: {len(uncovered_routes)}")
+else:
+    print("Sve rute su pokrivene!")
+#-----------------------
+
 flight_schedule_df = generate_flight_schedule(
     best_individual.code, destinations, plane_types, specific_planes, T_r, base_time
 )
