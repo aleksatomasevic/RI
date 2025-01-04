@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 import json
 import pandas as pd
+from datetime import datetime, timedelta
 
 # ucitavanje iz json fajla
 # kroisticemo apsolutne putanje do fajla
@@ -78,19 +79,48 @@ else:
 
 class Individual:
     def __init__(self, R, T):
-        # izmena
         self.code = self.initialize_valid_solution(R, T)
-        #-------------------------------------------------
         self.fitness = None  # Fitnes se računa kasnije
 
     # izmena
     # ovo je funkcija koja ce da nam osigura da imamo tacno jednu jedinicu u svakoj vrti tj za svaku rutu
-    def initialize_valid_solution(self, R, T, epsilon=0.01):
+    # def initialize_valid_solution(self, R, T, epsilon=0.01):
+    #     code = np.zeros((R, T), dtype=int)
+    #     for r in range(R):
+    #         t = random.randint(0, T-1)
+    #         code[r, t] = 1
+    #     return code
+    def initialize_valid_solution(self, R, T):
         code = np.zeros((R, T), dtype=int)
+
         for r in range(R):
-            t = random.randint(0, T-1)
-            code[r, t] = 1
+            # Heuristički pokušaj pronalaska najboljeg aviona
+            best_type = None
+            best_score = float('inf')
+
+            for t in range(T):
+                cost = F_t_r[r][t]
+                capacity = C_t[t]
+                passengers = P_r[r]
+
+                # Proveri validnost
+                if capacity >= passengers:  # Avion može prevesti sve putnike
+                    if cost < best_score:  # Pronađi minimalni trošak
+                        best_score = cost
+                        best_type = t
+
+            # Ako heuristika ne pronađe validan avion
+            if best_type is None:
+                # Nasumično dodeli bilo koji avion
+                random_type = np.random.randint(0, T)
+                best_type = random_type
+
+            # Dodeli avion za rutu
+            code[r, best_type] = 1
+
         return code
+
+
 
     # funkcija koja ce da nam proverava validnost jedinke nakon mutacije i ukrstanja
     # def is_valid(self):
@@ -274,27 +304,35 @@ def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
 def generate_flight_schedule(best_code, destinations, plane_types, specific_planes, T_r, base_time):
     flight_schedule = []
     flight_count = 1  # Brojač letova
-    #available_times = {t: [base_time] * A_t[t] for t in all_types}  # Početno vreme za sve avione
+
+    # Pretvaranje base_time u datetime ako je prosleđeno kao string
+    if isinstance(base_time, str):
+        base_time = datetime.strptime(base_time, "%H:%M")
+
     available_times = {t: [base_time] * A_t[t] for t in range(len(all_types))}
     flight_hours = {t: [0] * A_t[t] for t in range(len(all_types))}  # Početno radno vreme za sve avione
 
-
+    # Globalno vreme za raspoređivanje polazaka
+    # added
+    global_time = base_time
 
     for r, row in enumerate(best_code):
         # Pronađi najranije dostupno vreme za sve avione
-        #earliest_time = min([min(available_times[t]) for t in all_types])
+        #earliest_time = min([min(available_times[t]) for t in range(len(plane_types))])
         assigned = False # Da li je ruta pokrivena
-        earliest_time = min([min(available_times[t]) for t in range(len(all_types))])
 
         for t, assigned in enumerate(row):
             if assigned == 1:  # Ako je ruta pokrivena tipom aviona
                 for a in specific_planes[t]:
                     if (
-                        available_times[t][a] <= earliest_time and  # Proveri dostupnost
+                        available_times[t][a] <= global_time and  # Proveri dostupnost
                         flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proveri maksimalno radno vreme
                     ):
-                        departure_time = available_times[t][a]  # Vreme polaska
-                        available_times[t][a] += T_r[r] + H_t[t]  # Ažuriranje vremena dostupnosti
+                        # added
+                        departure_time = max(global_time, available_times[t][a])  # Najraniji mogući polazak
+                        available_times[t][a] = departure_time + timedelta(minutes=T_r[r] + H_t[t])  # Ažuriraj dostupnost
+
+                        #available_times[t][a] += departure_time + T_r[r] + H_t[t]  # Ažuriranje vremena dostupnosti
                         flight_hours[t][a] += T_r[r] + H_t[t]  # Ažuriranje radnog vremena
 
                         flight_schedule.append({
@@ -302,9 +340,11 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
                             "Destination": destinations[r],
                             "Plane Type": plane_types[t],
                             "Plane ID": f"T{t+1}-{a+1}",
-                            "Departure Time": f"{departure_time}:00"
+                            "Departure Time": departure_time.strftime("%H:%M"),
                         })
                         flight_count += 1
+                        # added
+                        global_time += timedelta(minutes=5)  # Povećaj globalno vreme za 5 minuta
                         assigned = True
                         break  # Prvi slobodan avion unutar tipa
 

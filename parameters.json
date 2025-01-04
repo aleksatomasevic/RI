@@ -20,7 +20,7 @@
       "price_per_passenger": [10, 15, 12, 20, 10],
       "destinations": ["Paris", "New York", "Tokyo", "London", "Berlin"],
       "plane_types": ["Airbus A320", "Boeing 737", "Embraer E190"],
-      "base_time": 6
+      "base_time": "6:00"
   },
   "dataset2": {
       "R": 4,
@@ -42,7 +42,7 @@
       "price_per_passenger": [12, 10, 15, 8],
       "destinations": ["Los Angeles", "Chicago", "Houston", "Miami"],
       "plane_types": ["Airbus A320", "Boeing 737"],
-      "base_time": 7
+      "base_time": "7:00"
   },
   "dataset3": {
       "R": 3,
@@ -63,7 +63,7 @@
       "price_per_passenger": [12, 10, 20],
       "destinations": ["Rome", "Venice", "Milan"],
       "plane_types": ["Boeing 737", "Embraer E190"],
-      "base_time": 5
+      "base_time": "5:00"
   },
   "dataset4": {
       "R": 20,
@@ -106,7 +106,7 @@
           "Shanghai", "Beijing", "Singapore", "Hong Kong", "Seoul"
       ],
       "plane_types": ["Airbus A320", "Boeing 737", "Embraer E190", "Airbus A350", "Boeing 777"],
-      "base_time": 6
+      "base_time": "6:00"
   },
   "dataset5": {
     "R": 10,
@@ -134,7 +134,7 @@
     "price_per_passenger": [15, 18, 12, 20, 14, 16, 19, 17, 22, 18],
     "destinations": ["Berlin", "Tokyo", "Paris", "Rome", "Madrid", "Dubai", "Milan", "New York", "Los Angeles", "Chicago"],
     "plane_types": ["Airbus A320", "Boeing 737", "Embraer E190", "Boeing 777"],
-    "base_time": 6
+    "base_time": "6:00"
 },
 "dataset6": {
     "R": 12,
@@ -168,7 +168,7 @@
         "Los Angeles", "Sydney"
     ],
     "plane_types": ["Airbus A320", "Boeing 737", "Embraer E190", "Boeing 777"],
-    "base_time": 7
+    "base_time": "7:00"
 }, 
 "dataset7": {
     "R": 50,
@@ -267,7 +267,7 @@
         "Zagreb", "Ljubljana", "Sarajevo", "Skopje", "Tirana"
     ],
     "plane_types": ["Airbus A320", "Boeing 737", "Embraer E190", "Boeing 777", "Airbus A350", "Bombardier CRJ"],
-    "base_time": 5
+    "base_time": "5:00"
 }
 
 
