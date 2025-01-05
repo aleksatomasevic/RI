@@ -81,44 +81,45 @@ class Individual:
     def __init__(self, R, T):
         self.code = self.initialize_valid_solution(R, T)
         self.fitness = None  # Fitnes se računa kasnije
+        self.uncovered_routes = []
 
     # izmena
     # ovo je funkcija koja ce da nam osigura da imamo tacno jednu jedinicu u svakoj vrti tj za svaku rutu
-    # def initialize_valid_solution(self, R, T, epsilon=0.01):
-    #     code = np.zeros((R, T), dtype=int)
-    #     for r in range(R):
-    #         t = random.randint(0, T-1)
-    #         code[r, t] = 1
-    #     return code
-    def initialize_valid_solution(self, R, T):
+    def initialize_valid_solution(self, R, T, epsilon=0.01):
         code = np.zeros((R, T), dtype=int)
-
         for r in range(R):
-            # Heuristički pokušaj pronalaska najboljeg aviona
-            best_type = None
-            best_score = float('inf')
-
-            for t in range(T):
-                cost = F_t_r[r][t]
-                capacity = C_t[t]
-                passengers = P_r[r]
-
-                # Proveri validnost
-                if capacity >= passengers:  # Avion može prevesti sve putnike
-                    if cost < best_score:  # Pronađi minimalni trošak
-                        best_score = cost
-                        best_type = t
-
-            # Ako heuristika ne pronađe validan avion
-            if best_type is None:
-                # Nasumično dodeli bilo koji avion
-                random_type = np.random.randint(0, T)
-                best_type = random_type
-
-            # Dodeli avion za rutu
-            code[r, best_type] = 1
-
+            t = random.randint(0, T-1)
+            code[r, t] = 1
         return code
+    # def initialize_valid_solution(self, R, T):
+    #     code = np.zeros((R, T), dtype=int)
+
+    #     for r in range(R):
+    #         # Heuristički pokušaj pronalaska najboljeg aviona
+    #         best_type = None
+    #         best_score = float('inf')
+
+    #         for t in range(T):
+    #             cost = F_t_r[r][t]
+    #             capacity = C_t[t]
+    #             passengers = P_r[r]
+
+    #             # Proveri validnost
+    #             if capacity >= passengers:  # Avion može prevesti sve putnike
+    #                 if cost < best_score:  # Pronađi minimalni trošak
+    #                     best_score = cost
+    #                     best_type = t
+
+    #         # Ako heuristika ne pronađe validan avion
+    #         if best_type is None:
+    #             # Nasumično dodeli bilo koji avion
+    #             random_type = np.random.randint(0, T)
+    #             best_type = random_type
+
+    #         # Dodeli avion za rutu
+    #         code[r, best_type] = 1
+
+    #     return code
 
 
 
@@ -130,19 +131,49 @@ class Individual:
     def calculate_fitness(self):
         self.fitness, _, _, _ = self.evaluate_solution(self.code)
 
-    # izmena, pametniji mutate
+    # #izmena, pametniji mutate
+    # def mutate(self, generation, max_generations):
+    #     # Dinamička stopa mutacije fokusirana na nepokrivene rute
+    #     mutation_rate = 0.2 * (1 - generation / max_generations)
+
+    #     for r in uncovered_routes:  # Fokusiraj mutaciju na nepokrivene rute
+    #         t_new = random.randint(0, self.code.shape[1] - 1)
+    #         self.code[r] = np.zeros(self.code.shape[1], dtype=int)
+    #         self.code[r, t_new] = 1
+
+    #     if random.random() < mutation_rate:  # Nasumična mutacija
+    #         r = random.randint(0, self.code.shape[0] - 1)
+    #         t_old = np.argmax(self.code[r])
+    #         t_new = random.choice([t for t in range(self.code.shape[1]) if t != t_old])
+    #         self.code[r, t_old] = 0
+    #         self.code[r, t_new] = 1
+
     def mutate(self, generation, max_generations):
         # Dinamička stopa mutacije
         mutation_rate = 0.2 * (1 - generation / max_generations)
-        r = random.randint(0, self.code.shape[0] - 1)
-        if random.random() < mutation_rate:  # Više jedinica
-            self.code[r] = np.zeros(self.code.shape[1], dtype=int)
-            self.code[r, random.randint(0, self.code.shape[1] - 1)] = 1
-        else:
-            t_old = np.argmax(self.code[r])
+        
+        # Izračunaj trošak svake rute na osnovu trenutne dodele
+        route_costs = [
+            alpha * F_t_r[r][np.argmax(self.code[r])] - beta * min(P_r[r], C_t[np.argmax(self.code[r])]) * price_per_passenger[r]
+            for r in range(self.code.shape[0])
+        ]
+        
+        # Sortiraj rute po njihovom trošku u opadajućem redosledu
+        expensive_routes = np.argsort(route_costs)[::-1]
+        
+        # Odredi koliko ruta da mutira (broj zavisi od mutation_rate)
+        k = max(1, int(mutation_rate * len(expensive_routes)))
+
+        # Izvrši mutaciju na k najskupljih ruta
+        for r in expensive_routes[:k]:
+            t_old = np.argmax(self.code[r])  # Trenutni avion za rutu
+            # Izaberi novi tip aviona koji nije trenutni
             t_new = random.choice([t for t in range(self.code.shape[1]) if t != t_old])
+            # Ažuriraj dodelu
             self.code[r, t_old] = 0
             self.code[r, t_new] = 1
+
+
     #---------------------------------------------------------
 
 
@@ -211,6 +242,7 @@ class Individual:
         #print(f"Broj nepokrivenih ruta: {len(uncovered_routes)}")
         objective = alpha * total_cost - beta * total_profit
         # print(f"Ukupan trošak: {total_cost}, Ukupan profit: {total_profit}, Ciljna funkcija: {objective}\n")
+
         return objective, total_cost, total_profit, uncovered_routes
 
 def crossover(parent1, parent2, child1, child2, crossover_epsilon=0.1):
@@ -235,25 +267,7 @@ def crossover(parent1, parent2, child1, child2, crossover_epsilon=0.1):
     child2.code = temp2
     #--------------------------------------------------------------------------
 
-# def selection(population):
-#     TOURNAMENT_SIZE = 5
-#     selected = random.sample(population, TOURNAMENT_SIZE)
-    
-#     # Računaj diverzitet unutar turnira
-#     diversity_bonus = [
-#         sum(np.sum(np.abs(ind.code - other.code)) for other in selected) for ind in selected
-#     ]
-    
-#     # Kombinujte fitnes i bonus za diverzitet
-#     fitness_with_diversity = [
-#         ind.fitness - 0.1 * diversity for ind, diversity in zip(selected, diversity_bonus)
-#     ]
-    
-#     # Izaberi jedinku sa najboljim kombinovanim fitnesom
-#     best = selected[np.argmin(fitness_with_diversity)]
-#     return best
-
-#izmena, pametniji selection 
+#izmena, pametniji selection, rang selekcija 
 def selection(population):
     # Rangiraj populaciju prema fitnesu (manji fitnes je bolji)
     population.sort(key=lambda x: x.fitness)
@@ -267,10 +281,62 @@ def selection(population):
     return selected
 #------------------------------------
 
+def heuristic_solution():
+    code = np.zeros((R, T), dtype=int)
+    available_times = {t: [0] * A_t[t] for t in range(T)}
+    for r in range(R):
+        best_t = -1
+        earliest_time = float('inf')
+        for t in range(T):
+            for a in range(A_t[t]):
+                if available_times[t][a] + T_r[r] + H_t[t] <= max_hours and available_times[t][a] < earliest_time:
+                    best_t = t
+                    earliest_time = available_times[t][a]
+        if best_t != -1:
+            code[r, best_t] = 1
+            for a in range(A_t[best_t]):
+                if available_times[best_t][a] <= earliest_time:
+                    available_times[best_t][a] += T_r[r] + H_t[best_t]
+                    break
+    return code
+
+# def heuristic_solution():
+#     code = np.zeros((R, T), dtype=int)
+#     available_times = {t: [0] * A_t[t] for t in range(T)}
+#     flight_hours = {t: [0] * A_t[t] for t in range(T)}
+    
+#     for r in range(R):
+#         best_t = None
+#         best_score = float('inf')
+        
+#         for t in range(T):
+#             for a in range(A_t[t]):
+#                 if available_times[t][a] + T_r[r] + H_t[t] <= max_hours:
+#                     cost = F_t_r[r][t]
+#                     if cost < best_score:
+#                         best_t = t
+#                         best_score = cost
+        
+#         if best_t is not None:
+#             code[r, best_t] = 1
+#             for a in range(A_t[best_t]):
+#                 if available_times[best_t][a] == 0:
+#                     available_times[best_t][a] += T_r[r] + H_t[best_t]
+#                     break
+#     return code
+
 
 def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
     # Inicijalizacija populacije
-    population = [Individual(R, T) for _ in range(POPULATION_SIZE)]
+    population = [Individual(R, T) for _ in range(POPULATION_SIZE - 10)]
+    
+    for _ in range(10):  # Generiši heuristički jedinke
+        individual = Individual(R, T)
+        individual.code = heuristic_solution()
+        individual.calculate_fitness()
+        population.append(individual)
+    
+    
     newPopulation = [Individual(R, T) for _ in range(POPULATION_SIZE)]
     for individual in population:
         individual.calculate_fitness()
@@ -354,9 +420,9 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
     return df
 
 # Parametri za genetski algoritam
-NUM_GENERATIONS = 5000
-POPULATION_SIZE = 200
-ELITISIM_SIZE = POPULATION_SIZE // 20
+NUM_GENERATIONS = 600
+POPULATION_SIZE = 150
+ELITISIM_SIZE = POPULATION_SIZE // 10
 if ELITISIM_SIZE % 2 == 1:
     ELITISIM_SIZE -= 1 
 
