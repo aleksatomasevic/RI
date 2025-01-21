@@ -12,7 +12,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojim radimo
-selected_dataset = "dataset3"  
+selected_dataset = "dataset4"  
 params = datasets[selected_dataset]
 
 
