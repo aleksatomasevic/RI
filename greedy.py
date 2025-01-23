@@ -82,9 +82,9 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
 
         for t in range(T):  # Iteracija kroz tipove aviona
             
-            #   # Provera da li avion tog tipa ima dovoljan domet za rutu
-            # if distance_r[r] > range_t[t]:
-            #     continue
+              # Provera da li avion tog tipa ima dovoljan domet za rutu
+            if distance_r[r] > range_t[t]:
+                continue
 
             for a in range(A_t[t]):  # Iteracija kroz avione tipa t
                 if (
@@ -146,9 +146,9 @@ def evaluate_solution(x_rt, base_time):
                 if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
                     #valid_assignments += 1
                     
-                    #   # Provera da li avion tog tipa ima dovoljan domet za rutu
-                    # if distance_r[r] > range_t[t]:
-                    #     continue
+                      # Provera da li avion tog tipa ima dovoljan domet za rutu
+                    if distance_r[r] > range_t[t]:
+                        continue
                             
                     for a in specific_planes[t]:
                         if (

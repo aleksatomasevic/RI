@@ -15,7 +15,7 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojm radimo
-selected_dataset = "dataset10"  
+selected_dataset = "realistic_dataset"  
 params = datasets[selected_dataset]
 
 
@@ -125,7 +125,7 @@ class Individual:
 
          # Pretvaranje base_time u datetime ako je prosleđeno kao string
         if isinstance(base_time, str):
-            base_time = datetime.strptime(base_time, "%H:%M")
+            base_time = datetime.strptime(base_time, "%Y-%m-%d %H:%M")
 
         available_times = {t: [base_time] * A_t[t] for t in all_types}
         flight_hours = {t: [0] * A_t[t] for t in all_types}
@@ -146,18 +146,16 @@ class Individual:
                 if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
                     #valid_assignments += 1
 
-                    # # Provera da li avion tog tipa ima dovoljan domet za rutu
-                    # if distance_r[r] > 8000 and range_t[t] < 12000:
-                    #     continue  # Dugodometni avioni su obavezni za duge rute
-
+                    if distance_r[r] > range_t[t]:
+                        continue  # Preskoči avione sa nedovoljnim dometom
 
                     for a in specific_planes[t]:
                         if (
                             available_times[t][a] <= earliest_time and
                             flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours
                         ):
-                            penalty = max(0, range_t[t] - distance_r[r])  # Penalizacija ako avion ima mnogo veći domet od potrebnog
-                            cost = F_t_r[r][t] + penalty
+                            # penalty = max(0, range_t[t] - distance_r[r]) * 100  # Penalizacija ako avion ima mnogo veći domet od potrebnog
+                            cost = F_t_r[r][t]
                             assigned = True
                             # print(f"Ruta {r}, Tip {t}, Avion {a} je validan. Trošak: {cost}, "
                             # f"Trenutno radno vreme: {flight_hours[t][a]}, Dostupnost: {available_times[t][a]}")  # Debugging
@@ -179,6 +177,41 @@ class Individual:
 
                             break
 
+            if not assigned:
+                best_departure_time = None
+                best_t = None
+                best_a = None
+
+                for t in all_types:
+                    if x_rt[r, t] == 1:
+                    
+                        if distance_r[r] > range_t[t]:
+                            continue  # Preskoči avione sa nedovoljnim dometom
+
+                        for a in specific_planes[t]:
+                            if flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours:
+                                candidate_departure_time = available_times[t][a]
+
+                                # Pronađi avion sa najranijim mogućim polaskom
+                                if best_departure_time is None or candidate_departure_time < best_departure_time:
+                                    best_departure_time = candidate_departure_time
+                                    best_t = t
+                                    best_a = a
+
+                # Dodeli avion sa najranijim mogućim polaskom
+                if best_t is not None and best_a is not None:
+                    route_cost += F_t_r[r][best_t]
+                    route_profit += min(P_r[r], C_t[best_t]) * price_per_passenger[r]
+
+                    departure_time = best_departure_time
+                    return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
+
+                    available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                    flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+
+                    assigned = True
+
+
             if  not assigned:  #Ruta nije pokrivena
                 uncovered_routes.append(r)
 
@@ -189,7 +222,7 @@ class Individual:
         # F-ja koju minimizujemo
         objective = alpha * total_cost - beta * total_profit
 
-        return (len(uncovered_routes), objective)
+        return (len(uncovered_routes), objective), uncovered_routes
 
 
 def crossover(parent1, parent2, child1, child2):
@@ -228,7 +261,7 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
     
     # Pretvaranje base_time u datetime ako je prosleđeno kao string
     if isinstance(base_time, str):
-        base_time = datetime.strptime(base_time, "%H:%M")
+        base_time = datetime.strptime(base_time, "%Y-%m-%d %H:%M")
 
     # Početna matrica rešenja
     code = np.zeros((R, T), dtype=int)
@@ -249,16 +282,17 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
 
         for t in range(T):  # Iteracija kroz tipove aviona
             
-        #    # Provera da li avion tog tipa ima dovoljan domet za rutu
-        #     if distance_r[r] > 8000 and range_t[t] < 12000:
-        #         continue  # Dugodometni avioni su obavezni za duge rute
+           # Provera da li avion tog tipa ima dovoljan domet za rutu
+            if distance_r[r] > range_t[t]:
+                continue  # Dugodometni avioni su obavezni za duge rute
             
             for a in range(A_t[t]):  # Iteracija kroz avione tipa t
                 if (
                     available_times[t][a] <= earliest_time and  # Provera dostupnosti
                     flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours  # Provera radnog vremena
                 ):
-                    cost = F_t_r[r][t]  # Trošak za rutu
+                    penalty = max(0, range_t[t] - distance_r[r]) * 0.1  # Penalizacija ako avion ima mnogo veći domet od potrebnog
+                    cost = F_t_r[r][t] + penalty
                     if cost < best_cost:  # Traženje najmanjeg troška
                         best_t = t
                         best_a = a  # Zabeleži koji avion je najbolji
@@ -279,6 +313,38 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
 
             # Povećaj globalno vreme za minimalni razmak između letova
             global_time = departure_time + timedelta(minutes=5)
+
+            # Ako nijedan avion nije pronađen, dodeli najraniji slobodan avion koji zadovoljava
+        if not assigned:
+            best_t = -1
+            best_a = -1
+            earliest_available = None
+
+            for t in range(T):
+
+                if distance_r[r] > range_t[t]:
+                    continue  # Preskoči avione sa nedovoljnim dometom
+
+                for a in range(A_t[t]):
+                    if flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours:
+                        if earliest_available is None or available_times[t][a] < earliest_available:
+                            best_t = t
+                            best_a = a
+                            earliest_available = available_times[t][a]
+
+            if best_t != -1 and best_a != -1:  # Ako je pronađen odgovarajući avion
+                code[r, best_t] = 1
+
+                departure_time = earliest_available
+                return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
+
+                # Ažuriraj dostupnost aviona (dodaj vreme obrade)
+                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+
+                # Ažuriraj radno vreme aviona
+                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+
+                assigned = True
 
     return code
 
@@ -340,7 +406,7 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
 
     # Pretvaranje base_time u datetime ako je prosleđeno kao string
     if isinstance(base_time, str):
-        base_time = datetime.strptime(base_time, "%H:%M")
+        base_time = datetime.strptime(base_time, "%Y-%m-%d %H:%M")
 
     available_times = {t: [base_time] * A_t[t] for t in range(len(all_types))}
     flight_hours = {t: [0] * A_t[t] for t in range(len(all_types))}  # Početno radno vreme za sve avione
@@ -354,8 +420,12 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
         earliest_time = max(global_time, min([min(available_times[t]) for t in range(len(plane_types))]))
         assigned = False # Da li je ruta pokrivena
 
-        for t, assigned in enumerate(row):
-            if assigned == 1:  # Ako je ruta pokrivena tipom aviona
+        for t, value in enumerate(row):
+            if value == 1:  # Ako je ruta pokrivena tipom aviona
+                
+                if distance_r[r] > range_t[t]:
+                    continue  # Preskoči avione sa nedovoljnim dometom
+
                 for a in specific_planes[t]:
                     if (
                         available_times[t][a] <= earliest_time and  # Proveri dostupnost
@@ -373,22 +443,68 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
                             "Destination": destinations[r],
                             "Plane Type": plane_types[t],
                             "Plane ID": f"T{t+1}-{a+1}",
-                            "Departure Time": departure_time.strftime("%H:%M"),
-                            "Return Time": return_time.strftime("%H:%M"),
+                            "Departure Time": departure_time.strftime("%Y-%m-%d %H:%M"),
+                            "Return Time": return_time.strftime("%Y-%m-%d %H:%M"),
+                            "Departure Timestamp": departure_time,  # Dodato za sortiranje
                         })
                         flight_count += 1
                         # added
                         global_time = departure_time + timedelta(minutes=5)  # Povećaj globalno vreme za 5 minuta
                         assigned = True
                         break  # Prvi slobodan avion unutar tipa
+        
+            
+            # Ako nijedan avion nije pronađen, dodeli najraniji slobodan avion koji zadovoljava
+        if not assigned:
+            earliest_available = datetime.max
+            best_t = -1
+            best_a = -1
+
+            for t in range(len(plane_types)):
+                if best_code[r][t] == 1:
+                    if distance_r[r] > range_t[t]:
+                        continue
+
+                    for a in specific_planes[t]:
+                        if flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours:
+                            if available_times[t][a] < earliest_available:
+                                earliest_available = available_times[t][a]
+                                best_t = t
+                                best_a = a
+
+            if best_t != -1 and best_a != -1:
+                departure_time = available_times[best_t][best_a]
+                return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
+
+                # Ažuriraj dostupnost i radne sate
+                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+
+                # Dodaj let u raspored
+                flight_schedule.append({
+                    "Flight Number": flight_count,
+                    "Destination": destinations[r],
+                    "Plane Type": plane_types[best_t],
+                    "Plane ID": f"T{best_t+1}-{best_a+1}",
+                    "Departure Time": departure_time.strftime("%Y-%m-%d %H:%M"),
+                    "Return Time": return_time.strftime("%Y-%m-%d %H:%M"),
+                    "Departure Timestamp": departure_time,  # Dodato za sortiranje
+                })
+                assigned = True
+                flight_count += 1
+
 
     # Kreiraj i prikaži tabelu
     df = pd.DataFrame(flight_schedule)
+    df = df.sort_values(by="Departure Timestamp")  # Sortiraj po vremenu polaska
+    df = df.drop(columns=["Departure Timestamp"])  # Ukloni pomoćnu kolonu nakon sortiranja
+
+
     print(df)
     return df
 
 # Parametri za genetski algoritam
-NUM_GENERATIONS = 500
+NUM_GENERATIONS = 2000
 POPULATION_SIZE = 100
 ELITISIM_SIZE = POPULATION_SIZE // 10
 if ELITISIM_SIZE % 2 == 1:
@@ -400,7 +516,7 @@ print("Najbolja jedinka:")
 print(best_individual.code)
 
 #izmena aleksa
-uncovered_routes, fitness  = best_individual.evaluate_solution(best_individual.code, base_time)
+uncovered_routes, fitness = best_individual.evaluate_solution(best_individual.code, base_time)
 print(f"Fitnes: {fitness}")
 if uncovered_routes:
     print(f"Nepokrivene rute: {uncovered_routes}")
