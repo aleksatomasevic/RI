@@ -42,6 +42,12 @@ all_routes = range(R) #Sve rute
 all_types = range(T) #Svi tipovi
 specific_planes = {t: range(A_t[t]) for t in all_types}  # Skup specifičnih aviona unutar svakog tipa
 
+# Konstante za dnevne limite i vreme čekanja
+short_range_limit = 16  # Maksimalni sati rada za male avione
+long_range_limit = 20   # Maksimalni sati rada za velike avione
+wait_time_hours = 6     # Vreme čekanja na pisti nakon prekoračenja limita
+
+
 #izmena, proverava da li postoji bar jedno validno resenje unutar dataseta
 def validate_dataset(R, T, A_t, T_r, H_t, max_hours):
     uncovered_routes = []
@@ -135,7 +141,6 @@ class Individual:
         for r in all_routes:
             route_cost = 0
             route_profit = 0
-            valid_assignments = 0  # Broj validnih dodela aviona za rutu
             assigned = False
 
             # Pronalazi prvi slobodan avion unutar svih tipova
@@ -144,36 +149,41 @@ class Individual:
 
             for t in all_types:
                 if x_rt[r, t] == 1:  # Ruta r pokrivena tipom t?
-                    #valid_assignments += 1
 
                     if distance_r[r] > range_t[t]:
                         continue  # Preskoči avione sa nedovoljnim dometom
 
                     for a in specific_planes[t]:
                         if (
-                            available_times[t][a] <= earliest_time and
-                            flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours
+                            available_times[t][a] <= earliest_time
+                            # flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours
                         ):
-                            # penalty = max(0, range_t[t] - distance_r[r]) * 100  # Penalizacija ako avion ima mnogo veći domet od potrebnog
+
+                            # Provera dnevnog limita za male i velike avione
+                            daily_limit = short_range_limit if range_t[t] <= 5000 else long_range_limit
+
+                            # Ažuriraj vreme polaska i povratka
+                            departure_time = earliest_time
+                            return_time = departure_time + timedelta(hours=T_r[r] + H_t[t])
+                            
+                            if flight_hours[t][a] + (T_r[r] + H_t[t]) >= daily_limit:
+                                # Ažuriraj dostupnost sa čekanjem na pisti
+                                available_times[t][a] = return_time + timedelta(hours=wait_time_hours)
+                                flight_hours[t][a] = 0  # Resetuj sate posle čekanja
+                            else:
+                                # Ažuriraj dostupnost i radne sate za trenutno avion
+                                available_times[t][a] = return_time + timedelta(minutes=turnaround_time)
+                                flight_hours[t][a] += T_r[r] + H_t[t] + turnaround_time / 60
+
                             cost = F_t_r[r][t]
                             assigned = True
                             # print(f"Ruta {r}, Tip {t}, Avion {a} je validan. Trošak: {cost}, "
                             # f"Trenutno radno vreme: {flight_hours[t][a]}, Dostupnost: {available_times[t][a]}")  # Debugging
                             route_cost += cost
                             route_profit += min(P_r[r], C_t[t]) * price_per_passenger[r]
-
-                            # Ažuriraj vreme polaska i povratka
-                            departure_time = earliest_time
-                            return_time = departure_time + timedelta(hours=T_r[r] + H_t[t])
                             
-                            # Ažuriraj dostupnost i radne sate za trenutno avion
-                            available_times[t][a] = return_time + timedelta(minutes=turnaround_time)
-                            flight_hours[t][a] += T_r[r] + H_t[t]
-
                             # Povećaj globalno vreme
                             global_time = departure_time + timedelta(minutes=5)
-
-                            valid_assignments += 1
 
                             break
 
@@ -181,36 +191,52 @@ class Individual:
                 best_departure_time = None
                 best_t = None
                 best_a = None
+                best_cost = float('inf')
+                best_wait_penalty = float('inf')  # Početna vrednost kazne čekanja
 
                 for t in all_types:
                     if x_rt[r, t] == 1:
-                    
                         if distance_r[r] > range_t[t]:
                             continue  # Preskoči avione sa nedovoljnim dometom
 
                         for a in specific_planes[t]:
-                            if flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours:
-                                candidate_departure_time = available_times[t][a]
+                            candidate_departure_time = available_times[t][a]
+                            cost = F_t_r[r][t]  # Trošak aviona na toj ruti
 
-                                # Pronađi avion sa najranijim mogućim polaskom
-                                if best_departure_time is None or candidate_departure_time < best_departure_time:
-                                    best_departure_time = candidate_departure_time
-                                    best_t = t
-                                    best_a = a
+                            # Kazna za čekanje aviona
+                            wait_penalty = 0
+                            if candidate_departure_time > earliest_time:
+                                wait_penalty = (candidate_departure_time - earliest_time).total_seconds() / 3600  # Sati čekanja
+                                wait_penalty *= 10  # Penalizacija po satu čekanja
+
+                            # Pronađi avion sa najranijim mogućim polaskom
+                            if best_departure_time is None or candidate_departure_time < best_departure_time:
+                                best_departure_time = candidate_departure_time
+                                best_t = t
+                                best_a = a
+                                best_cost = cost
+                                best_wait_penalty = wait_penalty  # Pamti penalizaciju za najbolji avion
 
                 # Dodeli avion sa najranijim mogućim polaskom
                 if best_t is not None and best_a is not None:
-                    route_cost += F_t_r[r][best_t]
-                    route_profit += min(P_r[r], C_t[best_t]) * price_per_passenger[r]
-
                     departure_time = best_departure_time
                     return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
 
-                    available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
-                    flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+                    # Provera dnevnog limita
+                    daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
+                    if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
+                        # Penalizacija zbog čekanja na pisti
+                        available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
+                        flight_hours[best_t][best_a] = 0  # Reset radnog vremena
+                    else:
+                        # Ažuriraj dostupnost i radno vreme
+                        available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                        flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
+
+                    route_cost += best_cost + best_wait_penalty
+                    route_profit += min(P_r[r], C_t[best_t]) * price_per_passenger[r]
 
                     assigned = True
-
 
             if  not assigned:  #Ruta nije pokrivena
                 uncovered_routes.append(r)
@@ -288,8 +314,8 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
             
             for a in range(A_t[t]):  # Iteracija kroz avione tipa t
                 if (
-                    available_times[t][a] <= earliest_time and  # Provera dostupnosti
-                    flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours  # Provera radnog vremena
+                    available_times[t][a] <= earliest_time  # Provera dostupnosti
+                    # flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours  # Provera radnog vremena
                 ):
                     penalty = max(0, range_t[t] - distance_r[r]) * 0.1  # Penalizacija ako avion ima mnogo veći domet od potrebnog
                     cost = F_t_r[r][t] + penalty
@@ -301,36 +327,41 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
         if assigned:  # Ako je ruta pokrivena
             code[r, best_t] = 1
 
-            # Odredi vreme polaska i povratka
             departure_time = earliest_time
             return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
 
-            # Ažuriraj dostupnost aviona (dodaj vreme obrade)
-            available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+            # Provera dnevnog limita za male i velike avione
+            daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
 
-            # Ažuriraj radno vreme aviona
-            flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+            if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
+                # Ažuriraj dostupnost sa čekanjem na pisti
+                available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
+                flight_hours[best_t][best_a] = 0  # Resetuj sate posle čekanja
+            else:
+                # Ažuriraj dostupnost i radne sate
+                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
 
             # Povećaj globalno vreme za minimalni razmak između letova
             global_time = departure_time + timedelta(minutes=5)
 
-            # Ako nijedan avion nije pronađen, dodeli najraniji slobodan avion koji zadovoljava
+       # Ako nijedan avion nije pronađen, traži najraniji slobodan avion koji zadovoljava
         if not assigned:
             best_t = -1
             best_a = -1
             earliest_available = None
 
             for t in range(T):
-
                 if distance_r[r] > range_t[t]:
                     continue  # Preskoči avione sa nedovoljnim dometom
 
                 for a in range(A_t[t]):
-                    if flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours:
-                        if earliest_available is None or available_times[t][a] < earliest_available:
-                            best_t = t
-                            best_a = a
-                            earliest_available = available_times[t][a]
+                    candidate_departure_time = available_times[t][a]
+
+                    if earliest_available is None or candidate_departure_time < earliest_available:
+                        best_t = t
+                        best_a = a
+                        earliest_available = candidate_departure_time
 
             if best_t != -1 and best_a != -1:  # Ako je pronađen odgovarajući avion
                 code[r, best_t] = 1
@@ -338,11 +369,17 @@ def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
                 departure_time = earliest_available
                 return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
 
-                # Ažuriraj dostupnost aviona (dodaj vreme obrade)
-                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                # Provera dnevnog limita za male i velike avione
+                daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
 
-                # Ažuriraj radno vreme aviona
-                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+                if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
+                    # Penalizacija zbog čekanja na pisti
+                    available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
+                    flight_hours[best_t][best_a] = 0  # Reset radnih sati
+                else:
+                    # Standardno ažuriranje dostupnosti i radnih sati
+                    available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                    flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
 
                 assigned = True
 
@@ -428,15 +465,24 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
 
                 for a in specific_planes[t]:
                     if (
-                        available_times[t][a] <= earliest_time and  # Proveri dostupnost
-                        flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proveri maksimalno radno vreme
+                        available_times[t][a] <= earliest_time  # Proveri dostupnost
+                        # flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proveri maksimalno radno vreme
                     ):
-                        # added
-                        departure_time = earliest_time  # Najraniji mogući polazak
-                        return_time = departure_time + timedelta(hours=T_r[r] + H_t[t])  # Ažuriraj dostupnost
+                        # Provera dnevnog limita za male i velike avione
+                        daily_limit = short_range_limit if range_t[t] <= 5000 else long_range_limit
 
-                        available_times[t][a] = return_time + timedelta(minutes=turnaround_time) # Ažuriranje vremena dostupnosti
-                        flight_hours[t][a] += T_r[r] + H_t[t]  # Ažuriranje radnog vremena
+                        # Ažuriraj vreme polaska i povratka
+                        departure_time = earliest_time
+                        return_time = departure_time + timedelta(hours=T_r[r] + H_t[t])
+                        
+                        if flight_hours[t][a] + (T_r[r] + H_t[t]) >= daily_limit:
+                            # Ažuriraj dostupnost sa čekanjem na pisti
+                            available_times[t][a] = return_time + timedelta(hours=wait_time_hours)
+                            flight_hours[t][a] = 0  # Resetuj sate posle čekanja
+                        else:
+                            # Ažuriraj dostupnost i radne sate za trenutno avion
+                            available_times[t][a] = return_time + timedelta(minutes=turnaround_time)
+                            flight_hours[t][a] += T_r[r] + H_t[t] + turnaround_time / 60
 
                         flight_schedule.append({
                             "Flight Number": flight_count,
@@ -446,39 +492,57 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
                             "Departure Time": departure_time.strftime("%Y-%m-%d %H:%M"),
                             "Return Time": return_time.strftime("%Y-%m-%d %H:%M"),
                             "Departure Timestamp": departure_time,  # Dodato za sortiranje
+                            "Return Timestamp" : return_time
                         })
                         flight_count += 1
                         # added
                         global_time = departure_time + timedelta(minutes=5)  # Povećaj globalno vreme za 5 minuta
                         assigned = True
                         break  # Prvi slobodan avion unutar tipa
-        
-            
-            # Ako nijedan avion nije pronađen, dodeli najraniji slobodan avion koji zadovoljava
+
+        # Ako nijedan avion nije pronađen, traži najraniji slobodan avion
         if not assigned:
-            earliest_available = datetime.max
-            best_t = -1
-            best_a = -1
+            earliest_available = None
+            best_t = None
+            best_a = None
+            best_cost = float('inf')
+            best_wait_penalty = float('inf')  # Početna vrednost kazne čekanja
 
             for t in range(len(plane_types)):
                 if best_code[r][t] == 1:
                     if distance_r[r] > range_t[t]:
-                        continue
+                        continue  # Preskoči avione sa nedovoljnim dometom
 
                     for a in specific_planes[t]:
-                        if flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours:
-                            if available_times[t][a] < earliest_available:
-                                earliest_available = available_times[t][a]
-                                best_t = t
-                                best_a = a
+                        candidate_departure_time = available_times[t][a]
+                        cost = F_t_r[r][t]  # Trošak aviona na toj ruti
 
-            if best_t != -1 and best_a != -1:
+                        # Kazna za čekanje aviona
+                        wait_penalty = 0
+                        if candidate_departure_time > earliest_time:
+                            wait_penalty = (candidate_departure_time - earliest_time).total_seconds() / 3600  # Sati čekanja
+                            wait_penalty *= 10  # Penalizacija po satu čekanja
+
+                        if earliest_available is None or candidate_departure_time < earliest_available:
+                            earliest_available = candidate_departure_time
+                            best_t = t
+                            best_a = a
+                            best_cost = cost
+                            best_wait_penalty = wait_penalty  # Pamti penalizaciju za najbolji avion
+
+            if best_t is not None and best_a is not None:
                 departure_time = available_times[best_t][best_a]
                 return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
 
-                # Ažuriraj dostupnost i radne sate
-                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
-                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t]
+                daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
+                if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
+                    # Penalizacija čekanjem od 6 sati i resetovanje radnih sati
+                    available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
+                    flight_hours[best_t][best_a] = 0  # Reset radnih sati
+                else:
+                    # Standardno ažuriranje dostupnosti i radnih sati
+                    available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
+                    flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
 
                 # Dodaj let u raspored
                 flight_schedule.append({
@@ -489,22 +553,32 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
                     "Departure Time": departure_time.strftime("%Y-%m-%d %H:%M"),
                     "Return Time": return_time.strftime("%Y-%m-%d %H:%M"),
                     "Departure Timestamp": departure_time,  # Dodato za sortiranje
+                    "Return Timestamp" : return_time
                 })
-                assigned = True
                 flight_count += 1
-
+                assigned = True
 
     # Kreiraj i prikaži tabelu
     df = pd.DataFrame(flight_schedule)
     df = df.sort_values(by="Departure Timestamp")  # Sortiraj po vremenu polaska
     df = df.drop(columns=["Departure Timestamp"])  # Ukloni pomoćnu kolonu nakon sortiranja
 
-
     print(df)
-    return df
+
+    dg = pd.DataFrame(flight_schedule)
+    dg = dg.sort_values(by="Return Timestamp")  # Sortiraj po vremenu polaska
+    dg = dg.drop(columns=["Return Timestamp"])
+
+    print('\nSortirano po povratku')
+    print(dg)
+
+    return dg
+
+
+
 
 # Parametri za genetski algoritam
-NUM_GENERATIONS = 2000
+NUM_GENERATIONS = 1500
 POPULATION_SIZE = 100
 ELITISIM_SIZE = POPULATION_SIZE // 10
 if ELITISIM_SIZE % 2 == 1:
