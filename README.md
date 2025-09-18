@@ -21,7 +21,7 @@ Ovaj projekat bavi se **Fleet Assignment Problem-om (FAP)**, optimizacionim zada
 ## Dokumentacija
 
 Detaljniji opis metode, eksperimenata i rezultata nalazi se u dokumentu:  
-[projekat.pdf](./projekat.pdf)
+[projekat.pdf](./Fleet_assignment_problem_project.pdf)
 
 ## Autori
 
