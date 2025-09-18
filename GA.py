@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+import os
+import time
 
 # ucitavanje iz json fajla
 # kroisticemo apsolutne putanje do fajla
@@ -15,9 +17,13 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # biramo skup podatak s kojm radimo
-selected_dataset = "realistic_dataset"  
+#selected_dataset = os.getenv("SELECTED_DATASET", "condor")
+selected_dataset = "albatross_large"  
 params = datasets[selected_dataset]
 
+pd.set_option("display.max_colwidth", None)   # ne skraćuj sadržaj ćelija
+pd.set_option("display.max_columns", None)    # prikaži sve kolone
+pd.set_option("display.width", 0)             # auto-širina prema terminalu
 
 # postavljanje vrednosti promenljivama
 R = params["R"] # Broj ruta
@@ -47,44 +53,6 @@ short_range_limit = 16  # Maksimalni sati rada za male avione
 long_range_limit = 20   # Maksimalni sati rada za velike avione
 wait_time_hours = 6     # Vreme čekanja na pisti nakon prekoračenja limita
 
-
-#izmena, proverava da li postoji bar jedno validno resenje unutar dataseta
-def validate_dataset(R, T, A_t, T_r, H_t, max_hours):
-    uncovered_routes = []
-    available_times = {t: [0] * A_t[t] for t in range(T)}  # Vremena dostupnosti za svaki avion
-    flight_hours = {t: [0] * A_t[t] for t in range(T)}  # Ukupno radno vreme za svaki avion
-
-    for r in range(R):
-        assigned = False
-        earliest_time = min([min(available_times[t]) for t in range(T)])  # Pronalazi najraniji avion
-
-        for t in range(T):
-            for a in range(A_t[t]):
-                if (
-                    available_times[t][a] <= earliest_time and  # Proverava da li avion može da poleti
-                    flight_hours[t][a] + (T_r[r] + H_t[t]) <= max_hours  # Proverava ukupno radno vreme
-                ):
-                    # Ažuriraj dostupnost i radne sate aviona
-                    available_times[t][a] = earliest_time + T_r[r] + H_t[t]
-                    flight_hours[t][a] += T_r[r] + H_t[t]
-                    assigned = True
-                    break  # Dodeljen avion za ovu rutu
-            if assigned:
-                break  # Ruta je pokrivena, ne traži dalje
-
-        if not assigned:
-            uncovered_routes.append(r)  # Ako nijedan avion nije mogao da pokrije rutu
-
-    return uncovered_routes
-
-
-# Pozovi validate_dataset
-uncovered_routes = validate_dataset(R, T, A_t, T_r, H_t, max_hours)
-if uncovered_routes:
-    print(f"Nepokrivene rute u dataset-u: {uncovered_routes}")
-else:
-    print("Sve rute u dataset-u mogu biti pokrivene.")
-#-----------------------------------
 
 class Individual:
     def __init__(self, R, T):
@@ -248,7 +216,7 @@ class Individual:
         # F-ja koju minimizujemo
         objective = alpha * total_cost - beta * total_profit
 
-        return (len(uncovered_routes), objective), uncovered_routes
+        return (len(uncovered_routes), objective)
 
 
 def crossover(parent1, parent2, child1, child2):
@@ -282,125 +250,12 @@ def selection(population, tournament_size=5):
     winner = min(tournament, key=lambda x: x.fitness)
     return winner
 
-
-def greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time):
-    
-    # Pretvaranje base_time u datetime ako je prosleđeno kao string
-    if isinstance(base_time, str):
-        base_time = datetime.strptime(base_time, "%Y-%m-%d %H:%M")
-
-    # Početna matrica rešenja
-    code = np.zeros((R, T), dtype=int)
-
-    # Dostupno vreme i radno vreme za svaki avion
-    available_times = {t: [base_time] * A_t[t] for t in range(T)}
-    flight_hours = {t: [0] * A_t[t] for t in range(T)}
-    global_time = base_time
-    turnaround_time = 45  # Vreme obrade aviona po povratku (u minutima)
-
-    for r in range(R):  # Iteracija kroz rute
-        best_t = -1
-        best_cost = float('inf')
-        assigned = False
-
-        # Pronađi najranije dostupno vreme među svim avionima
-        earliest_time = max(global_time, min([min(available_times[t]) for t in range(T)]))
-
-        for t in range(T):  # Iteracija kroz tipove aviona
-            
-           # Provera da li avion tog tipa ima dovoljan domet za rutu
-            if distance_r[r] > range_t[t]:
-                continue  # Dugodometni avioni su obavezni za duge rute
-            
-            for a in range(A_t[t]):  # Iteracija kroz avione tipa t
-                if (
-                    available_times[t][a] <= earliest_time  # Provera dostupnosti
-                    # flight_hours[t][a] + T_r[r] + H_t[t] <= max_hours  # Provera radnog vremena
-                ):
-                    penalty = max(0, range_t[t] - distance_r[r]) * 0.1  # Penalizacija ako avion ima mnogo veći domet od potrebnog
-                    cost = F_t_r[r][t] + penalty
-                    if cost < best_cost:  # Traženje najmanjeg troška
-                        best_t = t
-                        best_a = a  # Zabeleži koji avion je najbolji
-                        assigned = True
-
-        if assigned:  # Ako je ruta pokrivena
-            code[r, best_t] = 1
-
-            departure_time = earliest_time
-            return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
-
-            # Provera dnevnog limita za male i velike avione
-            daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
-
-            if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
-                # Ažuriraj dostupnost sa čekanjem na pisti
-                available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
-                flight_hours[best_t][best_a] = 0  # Resetuj sate posle čekanja
-            else:
-                # Ažuriraj dostupnost i radne sate
-                available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
-                flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
-
-            # Povećaj globalno vreme za minimalni razmak između letova
-            global_time = departure_time + timedelta(minutes=5)
-
-       # Ako nijedan avion nije pronađen, traži najraniji slobodan avion koji zadovoljava
-        if not assigned:
-            best_t = -1
-            best_a = -1
-            earliest_available = None
-
-            for t in range(T):
-                if distance_r[r] > range_t[t]:
-                    continue  # Preskoči avione sa nedovoljnim dometom
-
-                for a in range(A_t[t]):
-                    candidate_departure_time = available_times[t][a]
-
-                    if earliest_available is None or candidate_departure_time < earliest_available:
-                        best_t = t
-                        best_a = a
-                        earliest_available = candidate_departure_time
-
-            if best_t != -1 and best_a != -1:  # Ako je pronađen odgovarajući avion
-                code[r, best_t] = 1
-
-                departure_time = earliest_available
-                return_time = departure_time + timedelta(hours=T_r[r] + H_t[best_t])
-
-                # Provera dnevnog limita za male i velike avione
-                daily_limit = short_range_limit if range_t[best_t] <= 5000 else long_range_limit
-
-                if flight_hours[best_t][best_a] + (T_r[r] + H_t[best_t]) >= daily_limit:
-                    # Penalizacija zbog čekanja na pisti
-                    available_times[best_t][best_a] = return_time + timedelta(hours=wait_time_hours)
-                    flight_hours[best_t][best_a] = 0  # Reset radnih sati
-                else:
-                    # Standardno ažuriranje dostupnosti i radnih sati
-                    available_times[best_t][best_a] = return_time + timedelta(minutes=turnaround_time)
-                    flight_hours[best_t][best_a] += T_r[r] + H_t[best_t] + turnaround_time / 60
-
-                assigned = True
-
-    return code
-
-
-
 def genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE):
     # Inicijalizacija populacije
-    population = [Individual(R, T) for _ in range(POPULATION_SIZE - 10)]
+    population = [Individual(R, T) for _ in range(POPULATION_SIZE)]
 
      # Otvaranje fajla za zapisivanje
     log_file = open("log.txt", "w")
-
-    
-    for _ in range(10):  # Generiši heuristički jedinke
-        individual = Individual(R, T)
-        individual.code = greedy_algorithm(R, T, A_t, T_r, H_t, max_hours, F_t_r, base_time)
-        individual.calculate_fitness()
-        print(individual.fitness)
-        population.append(individual)
     
     newPopulation = [Individual(R, T) for _ in range(POPULATION_SIZE)]
     
@@ -575,8 +430,6 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
     return dg
 
 
-
-
 # Parametri za genetski algoritam
 NUM_GENERATIONS = 1500
 POPULATION_SIZE = 100
@@ -585,19 +438,26 @@ if ELITISIM_SIZE % 2 == 1:
     ELITISIM_SIZE -= 1 
 
 
+_t0 = time.perf_counter()
 best_individual = genetic_algorithm(R, T, NUM_GENERATIONS, POPULATION_SIZE, ELITISIM_SIZE)
+
+#izmena aleksa
+num_uncovered, fitness = best_individual.evaluate_solution(best_individual.code, base_time)
+_t1 = time.perf_counter()
+_runtime_s = _t1 - _t0
+
 print("Najbolja jedinka:")
 print(best_individual.code)
 
-#izmena aleksa
-uncovered_routes, fitness = best_individual.evaluate_solution(best_individual.code, base_time)
 print(f"Fitnes: {fitness}")
-if uncovered_routes:
-    print(f"Nepokrivene rute: {uncovered_routes}")
-    print(f"Broj nepokrivenih ruta: {uncovered_routes}")
+if num_uncovered:
+    print(f"Broj nepokrivenih ruta: {num_uncovered}")
 else:
     print("Sve rute su pokrivene!")
 #-----------------------
+
+# za runner
+#print(f"RESULT,GA,{selected_dataset},{num_uncovered},{fitness:.6f},{_runtime_s:.3f}")
 
 flight_schedule_df = generate_flight_schedule(
     best_individual.code, destinations, plane_types, specific_planes, T_r, base_time

@@ -6,6 +6,8 @@ from pathlib import Path
 import json
 from datetime import datetime, timedelta
 import pandas as pd
+import os
+import time
 
 
 current_dir = Path(__file__).parent 
@@ -15,8 +17,14 @@ with open(json_path, "r") as f:
     datasets = json.load(f)
 
 # ovde biramo skup podatak s kojm radimo
-selected_dataset = "dataset10"  
+# selected_dataset = os.getenv("SELECTED_DATASET", "condor")  
+selected_dataset = "condor"  
 params = datasets[selected_dataset]
+
+
+pd.set_option("display.max_colwidth", None)   # ne skraćuj sadržaj ćelija
+pd.set_option("display.max_columns", None)    # prikaži sve kolone
+pd.set_option("display.width", 0)             # auto-širina prema terminalu
 
 
 R = params["R"] # Broj ruta
@@ -315,14 +323,21 @@ def generate_flight_schedule(best_code, destinations, plane_types, specific_plan
     return dg
 
 
-num_iters = 500    
+num_iters = 300    
 neighborhoods = [1, 2, 3]  
 move_prob = 0.1           
 
+_t0 = time.perf_counter()
 best_solution, best_fitness = vns_flight_assignment(num_iters, neighborhoods, move_prob, base_time)
+_t1 = time.perf_counter()
+_runtime_s = _t1 - _t0
+
 print("Najbolje rešenje (matrica dodele):")
 print(best_solution)
 print("Fitnes (broj nepokrivenih ruta, objective):", best_fitness)
 
+#za runner
+# _num_uncovered, _objective = best_fitness
+# print(f"RESULT,VNS,{selected_dataset},{_num_uncovered},{_objective:.6f},{_runtime_s:.3f}")
 
 flight_schedule_df = generate_flight_schedule(best_solution, destinations, plane_types, specific_planes, T_r, base_time)
